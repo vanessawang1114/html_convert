@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF to PPTX 转换器测试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f7f9;
+        }
+        .container {
+            text-align: center;
+            background: #fff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            width: 90%;
+            max-width: 500px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 25px;
+        }
+        input[type="file"] {
+            display: block;
+            margin: 0 auto 20px auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 6px;
+            width: calc(100% - 22px); /* Adjust for padding and border */
+        }
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 12px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            color: white;
+            transition: background-color 0.3s, transform 0.1s;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        button:disabled {
+            background-color: #999;
+            cursor: not-allowed;
+        }
+        #btn-adobe { background-color: #fa0f00; }
+        #btn-cloudconvert { background-color: #3498db; }
+        #btn-convertapi { background-color: #f39c12; }
+        #btn-libreoffice { background-color: #27ae60; }
+        
+        #status {
+            margin-top: 25px;
+            font-size: 16px;
+            color: #555;
+            min-height: 24px;
+            font-weight: 500;
+        }
+        .error { color: #e74c3c; }
+        .success { color: #2ecc71; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>PDF to PPTX 转换器测试</h1>
+        <input type="file" id="pdfFile" accept=".pdf">
+
+        <div class="button-grid">
+            <button id="btn-adobe" data-api="adobe">使用 Adobe</button>
+            <button id="btn-cloudconvert" data-api="cloudconvert">使用 CloudConvert</button>
+            <button id="btn-convertapi" data-api="convertapi">使用 ConvertAPI</button>
+            <button id="btn-libreoffice" data-api="libreoffice">使用 LibreOffice</button>
+        </div>
+
+        <div id="status">请选择一个 PDF 文件并点击按钮开始转换</div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('pdfFile');
+        const statusDiv = document.getElementById('status');
+        const buttons = document.querySelectorAll('.button-grid button');
+
+        // 为每个按钮添加点击事件监听器
+        buttons.forEach(button => {
+            button.addEventListener('click', () => {
+                const apiName = button.getAttribute('data-api');
+                uploadAndConvert(apiName);
+            });
+        });
+
+        async function uploadAndConvert(apiName) {
+            const file = fileInput.files[0];
+
+            // 1. 验证文件
+            if (!file) {
+                updateStatus('请先选择一个 PDF 文件！', 'error');
+                return;
+            }
+
+            // 2. 准备 FormData
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const url = `http://localhost:5000/convert/${apiName}`;
+
+            // 3. 更新UI，禁用按钮
+            updateStatus(`正在上传并使用 ${apiName} 进行转换...`, 'normal');
+            toggleButtons(false);
+
+            try {
+                // 4. 发送 Fetch 请求
+                const response = await fetch(url, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                // 5. 处理响应
+                if (response.ok) {
+                    // 成功：响应体是文件流
+                    updateStatus('转换成功！正在准备下载...', 'success');
+                    const blob = await response.blob();
+                    
+                    // 从响应头中获取服务器建议的文件名
+                    const contentDisposition = response.headers.get('content-disposition');
+                    let downloadName = `${file.name.replace(/\.pdf$/i, '')}.pptx`;
+                    if (contentDisposition) {
+                        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+                        if (filenameMatch && filenameMatch[1]) {
+                            downloadName = filenameMatch[1];
+                        }
+                    }
+
+                    // 创建一个隐藏的链接来触发下载
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = downloadName;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(link.href); // 释放内存
+
+                } else {
+                    // 失败：响应体是 JSON 错误信息
+                    const errorData = await response.json();
+                    const errorMessage = errorData.error || `请求失败，状态码: ${response.status}`;
+                    updateStatus(`错误: ${errorMessage}`, 'error');
+                }
+            } catch (error) {
+                // 网络或其他 fetch 错误
+                console.error('Fetch Error:', error);
+                updateStatus('无法连接到服务器。请确保服务器正在运行。', 'error');
+            } finally {
+                // 6. 恢复UI，启用按钮
+                toggleButtons(true);
+            }
+        }
+
+        // 辅助函数：更新状态信息
+        function updateStatus(message, type = 'normal') {
+            statusDiv.textContent = message;
+            statusDiv.className = type; // 'error', 'success', or default
+        }
+
+        // 辅助函数：启用/禁用所有按钮
+        function toggleButtons(enabled) {
+            buttons.forEach(button => {
+                button.disabled = !enabled;
+            });
+        }
+    </script>
+
+</body>
+</html>
